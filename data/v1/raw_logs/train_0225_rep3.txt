@@ -1,0 +1,24 @@
+httperf: warning: open file limit > FD_SETSIZE; limiting max. # of open files to FD_SETSIZE
+httperf --timeout=120 --client=0/1 --server=192.0.2.1 --port=80 --uri=/server.php?size=100&cpuLoad=1000000 --rate=20 --send-buffer=4096 --recv-buffer=16384 --num-conns=300 --num-calls=1
+Maximum connect burst length: 1
+
+Total: connections 300 requests 300 replies 300 test-duration 15.760 s
+
+Connection rate: 19.0 conn/s (52.5 ms/conn, <=49 concurrent connections)
+Connection time [ms]: min 27.7 avg 919.5 max 2619.5 median 923.5 stddev 792.6
+Connection time [ms]: connect 0.5
+Connection length [replies/conn]: 1.000
+
+Request rate: 19.0 req/s (52.5 ms/req)
+Request size [B]: 102.0
+
+Reply rate [replies/s]: min 14.4 avg 17.4 max 19.0 stddev 2.6 (3 samples)
+Reply time [ms]: response 919.0 transfer 0.0
+Reply size [B]: header 174.0 content 64.0 footer 0.0 (total 238.0)
+Reply status: 1xx=0 2xx=300 3xx=0 4xx=0 5xx=0
+
+CPU time [s]: user 1.65 system 14.11 (user 10.5% system 89.5% total 100.0%)
+Net I/O: 6.3 KB/s (0.1*10^6 bps)
+
+Errors: total 0 client-timo 0 socket-timo 0 connrefused 0 connreset 0
+Errors: fd-unavail 0 addrunavail 0 ftab-full 0 other 0
