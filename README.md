@@ -9,9 +9,21 @@ The checksum manifest describes the published files, including the redacted logs
 
 This repository reconstructs the January–May 2026 course timeline from saved development snapshots.
 
-Run the checksum check from the repository root.
+## Setup
+
+Use Python 3.12 and run these commands from the repository root.
 
 ```sh
-cd data/v1
-sha256sum --check MANIFEST.sha256
+python3 -m venv .venv
+.venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/python -m pytest
+scripts/csizer verify
 ```
+
+The audit compares 975 CSV rows against their raw logs and identifies six validation
+configurations that also occur in training. See the [dataset report](evidence/dataset_report.md).
+
+## Reproduce
+
+`scripts/measure_stage1.sh` writes reports and figures to `artifacts/stage-1/`.
+The `stage-1` tag marks this milestone.
