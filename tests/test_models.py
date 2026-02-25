@@ -42,3 +42,18 @@ def test_split_excludes_leaked_and_non_steady_and_stalled():
     assert s.test_v1_style.config_id.tolist() == ["validation_0001", "validation_0002"]
     assert s.test_all_clean.config_id.tolist() == ["validation_0001", "validation_0003"]
     assert models.make_split(c, leaked=[]).train.config_id.tolist() == ["train_0001", "train_0003"]
+
+
+def test_fit_learns_a_cpu_law_on_synthetic_data():
+    rng = np.random.default_rng(0)
+    rows = []
+    for i in range(80):
+        cl = int(rng.choice([100_000, 500_000, 1_000_000, 5_000_000]))
+        cpus = float(rng.choice([1.0, 2.0]))
+        rows.append(_cfg(config_id=f"train_{i:04d}", cpuLoad=cl, cpus=cpus, arr=int(rng.choice([1, 2, 5])),
+                         rt_ms=3.4 + cl * 24.5e-6 * rng.normal(1, 0.01)))
+    c = pd.DataFrame(rows)
+    f = models.fit_all(c, n_iter=3, folds=4, names=["ridge", "random_forest"])
+    for name in ("ridge", "random_forest"):
+        m = models.metrics(c.rt_ms.to_numpy(), f[name].oof_pred_ms)
+        assert m["r2_log"] > 0.95, (name, m)

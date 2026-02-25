@@ -6,10 +6,20 @@ Target: log(mean response time). Models are trained on steady-state training con
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
+from scipy.stats import loguniform, randint, uniform
+from sklearn.base import clone
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import GroupKFold, RandomizedSearchCV
+from sklearn.neural_network import MLPRegressor
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVR
+from xgboost import XGBRegressor
 
 from .params import PARAMS
 
@@ -44,6 +54,76 @@ def target(c: pd.DataFrame) -> np.ndarray:
 def groups(c: pd.DataFrame) -> np.ndarray:
     """Parameter tuple id: duplicated configurations always fall in the same CV fold."""
     return c[list(PARAMS)].astype(str).agg("|".join, axis=1).factorize()[0]
+
+
+def model_specs() -> dict[str, tuple]:
+    """name -> (estimator, search space). Scale-sensitive models get a StandardScaler."""
+    return {
+        "ridge": (make_pipeline(StandardScaler(), Ridge()),
+                  {"ridge__alpha": loguniform(1e-4, 1e3)}),
+        "svr": (make_pipeline(StandardScaler(), SVR(kernel="rbf")),
+                {"svr__C": loguniform(1e-1, 1e3), "svr__epsilon": loguniform(1e-3, 0.3),
+                 "svr__gamma": loguniform(1e-3, 1)}),
+        "random_forest": (RandomForestRegressor(random_state=SEED, n_jobs=1),
+                          {"n_estimators": randint(100, 600), "max_depth": [None, 4, 6, 8, 12],
+                           "min_samples_leaf": randint(1, 6), "max_features": [1.0, 0.7, 0.5, "sqrt"]}),
+        "xgboost": (XGBRegressor(random_state=SEED, n_jobs=1, tree_method="hist"),
+                    {"n_estimators": randint(100, 800), "learning_rate": loguniform(0.01, 0.3),
+                     "max_depth": randint(2, 7), "subsample": uniform(0.6, 0.4),
+                     "colsample_bytree": uniform(0.6, 0.4), "reg_lambda": loguniform(1e-3, 10),
+                     "min_child_weight": randint(1, 6)}),
+        "mlp": (make_pipeline(StandardScaler(), MLPRegressor(max_iter=5000, random_state=SEED, early_stopping=False)),
+                {"mlpregressor__hidden_layer_sizes": [(16,), (32,), (64,), (32, 16), (64, 32)],
+                 "mlpregressor__alpha": loguniform(1e-5, 1e-1),
+                 "mlpregressor__learning_rate_init": loguniform(1e-4, 1e-2),
+                 "mlpregressor__activation": ["relu", "tanh"]}),
+    }
+
+
+def metrics(y_ms: np.ndarray, p_ms: np.ndarray) -> dict[str, float]:
+    err = p_ms - y_ms
+    ape = np.abs(err) / y_ms
+    ss_res = float(np.sum(err**2))
+    ss_tot = float(np.sum((y_ms - y_ms.mean()) ** 2))
+    return {
+        "n": int(len(y_ms)),
+        "r2": 1 - ss_res / ss_tot if ss_tot > 0 else float("nan"),
+        "rmse_ms": float(np.sqrt(np.mean(err**2))),
+        "mape": float(np.mean(ape)),
+        "p90_ape": float(np.quantile(ape, 0.9)),
+        "r2_log": float(1 - np.sum((np.log(p_ms) - np.log(y_ms)) ** 2)
+                        / np.sum((np.log(y_ms) - np.log(y_ms).mean()) ** 2)),
+    }
+
+
+@dataclass
+class Fitted:
+    name: str
+    estimator: object
+    best_params: dict
+    cv_rmse_log: float  # grouped 5-fold CV, RMSE of log(rt)
+    oof_pred_ms: np.ndarray = field(repr=False)  # out-of-fold predictions on the training set
+
+    def predict_ms(self, c: pd.DataFrame) -> np.ndarray:
+        return np.exp(self.estimator.predict(features(c)))
+
+
+def fit_all(train: pd.DataFrame, n_iter: int = 40, folds: int = 5, names: list[str] | None = None) -> dict[str, Fitted]:
+    X, y, g = features(train), target(train), groups(train)
+    cv = list(GroupKFold(n_splits=folds).split(X, y, g))
+    out = {}
+    for name, (est, space) in model_specs().items():
+        if names and name not in names:
+            continue
+        search = RandomizedSearchCV(est, space, n_iter=n_iter, cv=cv, scoring="neg_root_mean_squared_error",
+                                    random_state=SEED, n_jobs=-1, refit=True)
+        search.fit(X, y)
+        oof = np.empty(len(y))
+        for tr, te in cv:
+            m = clone(search.best_estimator_).fit(X.iloc[tr], y[tr])
+            oof[te] = m.predict(X.iloc[te])
+        out[name] = Fitted(name, search.best_estimator_, search.best_params_, -search.best_score_, np.exp(oof))
+    return out
 
 
 @dataclass
