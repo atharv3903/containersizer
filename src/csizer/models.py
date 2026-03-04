@@ -80,6 +80,9 @@ def model_specs() -> dict[str, tuple]:
     }
 
 
+# --- metrics (on response time in ms, after undoing the log) -------------------------------------
+
+
 def metrics(y_ms: np.ndarray, p_ms: np.ndarray) -> dict[str, float]:
     err = p_ms - y_ms
     ape = np.abs(err) / y_ms
@@ -94,6 +97,21 @@ def metrics(y_ms: np.ndarray, p_ms: np.ndarray) -> dict[str, float]:
         "r2_log": float(1 - np.sum((np.log(p_ms) - np.log(y_ms)) ** 2)
                         / np.sum((np.log(y_ms) - np.log(y_ms).mean()) ** 2)),
     }
+
+
+def bootstrap_ci(y_ms: np.ndarray, p_ms: np.ndarray, n: int = 2000, seed: int = SEED) -> dict[str, list[float]]:
+    """95% percentile intervals by resampling test configurations with replacement."""
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, len(y_ms), size=(n, len(y_ms)))
+    out = {"r2": [], "rmse_ms": [], "p90_ape": []}
+    for i in idx:
+        m = metrics(y_ms[i], p_ms[i])
+        for k in out:
+            out[k].append(m[k])
+    return {k: [float(np.nanquantile(v, 0.025)), float(np.nanquantile(v, 0.975))] for k, v in out.items()}
+
+
+# --- training --------------------------------------------------------------------------------------
 
 
 @dataclass
@@ -142,3 +160,19 @@ def make_split(configs: pd.DataFrame, leaked: list[str], drop_stalled_median: bo
     val = c[c.experiment_type == "validation"]
     clean = val[~val.config_id.isin(leaked)]
     return Split(tr, clean[clean.label == "steady"], val[val.label == "steady"], clean)
+
+
+def evaluate(fitted: dict[str, Fitted], split: Split, ci: bool = True) -> pd.DataFrame:
+    rows = []
+    for name, f in fitted.items():
+        y_tr = split.train["rt_ms"].to_numpy()
+        rows.append({"model": name, "set": "train_oof", "cv_rmse_log": f.cv_rmse_log, **metrics(y_tr, f.oof_pred_ms)})
+        for set_name, df in (("val_clean_steady", split.test_clean), ("val_v1_style_steady", split.test_v1_style),
+                             ("val_clean_all", split.test_all_clean)):
+            y, p = df["rt_ms"].to_numpy(), f.predict_ms(df)
+            row = {"model": name, "set": set_name, "cv_rmse_log": f.cv_rmse_log, **metrics(y, p)}
+            if ci and set_name == "val_clean_steady":
+                b = bootstrap_ci(y, p)
+                row |= {"r2_ci": b["r2"], "rmse_ci": b["rmse_ms"], "p90_ape_ci": b["p90_ape"]}
+            rows.append(row)
+    return pd.DataFrame(rows)
