@@ -19,7 +19,20 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("--out", type=Path, required=True)
     pp = sub.add_parser("plots", help="write dataset figures")
     pp.add_argument("--out", type=Path, required=True)
+    mp = sub.add_parser("models", help="train and evaluate the five regressors (stage 2)")
+    mp.add_argument("--out", type=Path, required=True)
+    mp.add_argument("--n-iter", type=int, default=40)
     a = ap.parse_args(argv)
+
+    if a.cmd == "models":
+        from . import stage2
+
+        root = a.data or default_data_root()
+        (a.out / "plots").mkdir(parents=True, exist_ok=True)
+        r = stage2.run(root, a.out, n_iter=a.n_iter)
+        stage2.feature_importance(root, a.out)
+        print(f"best model: {r['best']}; report at {a.out / 'models_report.md'}")
+        return 0
 
     paths = DataPaths(a.data or default_data_root())
     bundle = checks.load_bundle(paths)

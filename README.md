@@ -20,10 +20,13 @@ python3 -m venv .venv
 scripts/csizer verify
 ```
 
-The audit compares 975 CSV rows against their raw logs and identifies six validation
-configurations that also occur in training. See the [dataset report](evidence/dataset_report.md).
+## Results
+
+- [Dataset audit](evidence/dataset_report.md) checks all 975 measured runs against the httperf logs.
+- [Model evaluation](evidence/models_report.md) compares five regressors using grouped cross-validation.
+  The random forest reaches an R² of 0.997 and an RMSE of 2.7 ms on 41 clean steady-state holdout configurations.
 
 ## Reproduce
 
-`scripts/measure_stage1.sh` writes reports and figures to `artifacts/stage-1/`.
-The `stage-1` tag marks this milestone.
+`scripts/measure_stage2.sh` writes reports and figures to `artifacts/stage-2/`.
+The `stage-2` tag marks this milestone.
