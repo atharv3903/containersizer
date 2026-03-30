@@ -1,6 +1,8 @@
+import numpy as np
 import pandas as pd
 import pytest
 
+from csizer import dataset as ds
 from csizer import stability as st
 
 
@@ -46,3 +48,32 @@ def test_gate_flags_either_resource():
         _c(arr=10, mb_written=2.0, device_write=20, cpuLoad=100_000),     # rho_io 1.0: unsafe
     ])
     assert gate.predict_unsafe(c).tolist() == [False, True, True]
+
+
+def test_confusion():
+    y = np.array([True, True, False, False, False])
+    p = np.array([True, False, True, False, False])
+    m = st.confusion(y, p)
+    assert (m["tp"], m["fn"], m["fp"], m["tn"]) == (1, 1, 1, 2)
+    assert m["recall"] == 0.5 and m["false_alarm_rate"] == pytest.approx(1 / 3)
+
+
+def test_holdout_excludes_training_tuples():
+    c = pd.DataFrame([_c(), _c(config_id="validation_0001", experiment_type="validation"),
+                      _c(config_id="validation_0002", experiment_type="validation", arr=20)])
+    assert st.holdout_set(c).config_id.tolist() == ["validation_0002"]
+
+
+@pytest.mark.realdata
+def test_real_gate_catches_every_unsafe_configuration(real_paths):
+    c = ds.build_config_table(ds.load_runs(real_paths))
+    train = c[c.experiment_type == "train"]
+    gate = st.fit_gate(train)
+    assert gate.theta_io == pytest.approx(0.6)
+    assert 20 < gate.cal.ns_per_rand < 30
+    hold = st.holdout_set(c)
+    m = st.confusion(st.unsafe(hold), gate.predict_unsafe(hold))
+    assert (m["tp"], m["fn"]) == (4, 0) and m["fp"] <= 3
+    cv = st.grouped_cv_predictions(c)
+    m = st.confusion(st.unsafe(c), cv["gate"].to_numpy())
+    assert (m["tp"], m["fn"]) == (9, 0) and m["false_alarm_rate"] < 0.10

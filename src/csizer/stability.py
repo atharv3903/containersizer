@@ -19,6 +19,14 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import StratifiedGroupKFold
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+
+from . import models
+from .params import PARAMS
 
 SEED = 0
 EPS = 1e-3  # floor for log(rho_io) when nothing is written
@@ -85,3 +93,62 @@ def fit_gate(train: pd.DataFrame, theta_cpu: float = 1.0) -> Gate:
     bad = unsafe(train) & (u["rho_io"] >= u["rho_cpu"]).to_numpy()
     theta_io = float(u.loc[bad, "rho_io"].min()) if bad.any() else 1.0
     return Gate(cal, theta_cpu, theta_io)
+
+
+# --- classifiers -----------------------------------------------------------------------------------
+
+
+def clf_features(c: pd.DataFrame) -> pd.DataFrame:
+    f = models.features(c).copy()
+    f["log_rho_io"] = np.log(f["rho_io"] + EPS)
+    f["log_rho_cpu"] = np.log(f["rho_cpu"])
+    return f
+
+
+def classifier_specs() -> dict[str, object]:
+    return {
+        "logistic": make_pipeline(StandardScaler(), LogisticRegression(class_weight="balanced", C=1.0,
+                                                                       max_iter=5000)),
+        "random_forest_clf": RandomForestClassifier(n_estimators=500, min_samples_leaf=1, class_weight="balanced",
+                                                    random_state=SEED, n_jobs=-1),
+    }
+
+
+# --- evaluation ------------------------------------------------------------------------------------
+
+
+def confusion(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
+    tp = int(np.sum(y_true & y_pred))
+    fn = int(np.sum(y_true & ~y_pred))
+    fp = int(np.sum(~y_true & y_pred))
+    tn = int(np.sum(~y_true & ~y_pred))
+    return {"tp": tp, "fn": fn, "fp": fp, "tn": tn,
+            "recall": tp / (tp + fn) if tp + fn else float("nan"),
+            "false_alarm_rate": fp / (fp + tn) if fp + tn else float("nan"),
+            "precision": tp / (tp + fp) if tp + fp else float("nan")}
+
+
+def holdout_set(configs: pd.DataFrame) -> pd.DataFrame:
+    """Validation + grid-slice configurations whose parameter tuple never appears in training."""
+    train_keys = set(map(tuple, configs.loc[configs.experiment_type == "train", list(PARAMS)].values))
+    h = configs[configs.experiment_type != "train"]
+    keep = [tuple(k) not in train_keys for k in h[list(PARAMS)].values]
+    return h[keep]
+
+
+def grouped_cv_predictions(configs: pd.DataFrame, folds: int = 5) -> pd.DataFrame:
+    """Out-of-fold unsafe predictions for every configuration (all 325), grouped by tuple, stratified by label."""
+    y = unsafe(configs)
+    g = models.groups(configs)
+    out = pd.DataFrame(index=configs.index)
+    out["gate"] = False
+    for name in classifier_specs():
+        out[name] = False
+    cv = StratifiedGroupKFold(n_splits=folds, shuffle=True, random_state=SEED)
+    for tr, te in cv.split(configs, y, g):
+        trn, tst = configs.iloc[tr], configs.iloc[te]
+        out.iloc[te, out.columns.get_loc("gate")] = fit_gate(trn).predict_unsafe(tst)
+        for name, est in classifier_specs().items():
+            est.fit(clf_features(trn), y[tr])
+            out.iloc[te, out.columns.get_loc(name)] = est.predict(clf_features(tst)).astype(bool)
+    return out
