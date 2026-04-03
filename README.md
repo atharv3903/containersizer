@@ -25,8 +25,10 @@ scripts/csizer verify
 - [Dataset audit](evidence/dataset_report.md) checks all 975 measured runs against the httperf logs.
 - [Model evaluation](evidence/models_report.md) compares five regressors using grouped cross-validation.
   The random forest reaches an R² of 0.997 and an RMSE of 2.7 ms on 41 clean steady-state holdout configurations.
+- [Stability evaluation](evidence/stability_report.md) compares a utilization gate with classifiers.
+  The gate detects all nine unsafe configurations in grouped cross-validation with a 6.6% false-alarm rate.
 
 ## Reproduce
 
-`scripts/measure_stage2.sh` writes reports and figures to `artifacts/stage-2/`.
-The `stage-2` tag marks this milestone.
+`scripts/measure_stage3.sh` writes reports and figures to `artifacts/stage-3/`.
+The `stage-3` tag marks this milestone.

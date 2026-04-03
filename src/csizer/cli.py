@@ -22,7 +22,17 @@ def main(argv: list[str] | None = None) -> int:
     mp = sub.add_parser("models", help="train and evaluate the five regressors (stage 2)")
     mp.add_argument("--out", type=Path, required=True)
     mp.add_argument("--n-iter", type=int, default=40)
+    sp = sub.add_parser("stability", help="utilisation gate vs classifiers (stage 3)")
+    sp.add_argument("--out", type=Path, required=True)
     a = ap.parse_args(argv)
+
+    if a.cmd == "stability":
+        from . import stage3
+
+        r = stage3.run(a.data or default_data_root(), a.out)
+        print(f"gate held-out recall {r['holdout']['gate']['recall']:.0%}, "
+              f"false alarms {r['holdout']['gate']['fp']}; report at {a.out / 'stability_report.md'}")
+        return 0
 
     if a.cmd == "models":
         from . import stage2
