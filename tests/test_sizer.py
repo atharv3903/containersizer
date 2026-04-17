@@ -42,6 +42,12 @@ def test_gate_overrides_a_fast_prediction():
     assert best is None
 
 
+def test_guard_band_makes_the_sizer_more_conservative():
+    best0, _ = _sizer(0.0).recommend(arr=1, size=50, cpuLoad=1_000_000, sla_ms=28.5)
+    best1, _ = _sizer(0.05).recommend(arr=1, size=50, cpuLoad=1_000_000, sla_ms=28.5)
+    assert best0 is not None and best1 is None  # 28 ms fits 28.5; 28 x 1.05 = 29.4 does not
+
+
 def test_capacity_is_the_last_rate_before_failure():
     s = _sizer()
     # 1 CPU, 28 ms per request: rho_cpu < 1 up to 35 req/s

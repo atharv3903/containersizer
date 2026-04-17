@@ -84,3 +84,12 @@ class Sizer:
         ok = (a["safe"] & (a["bound_rt_ms"] <= sla_ms)).to_numpy()
         # capacity = last rate before the first failure (response time grows with load)
         return int(np.argmin(ok)) if not ok.all() else max_arr
+
+
+def fit_sizer(train: pd.DataFrame, n_iter: int = 40) -> Sizer:
+    gate = st.fit_gate(train)
+    reg_train = train[(train.label == "steady") & (train.n_stalls < 2)]
+    reg = models.fit_all(reg_train, n_iter=n_iter, names=["random_forest"])["random_forest"]
+    y = reg_train["rt_ms"].to_numpy()
+    guard = float(np.quantile(np.abs(reg.oof_pred_ms - y) / y, 0.9))  # P90 relative error, out of fold
+    return Sizer(gate, reg, guard)
