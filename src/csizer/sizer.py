@@ -18,6 +18,7 @@ from itertools import product
 
 import numpy as np
 import pandas as pd
+from sklearn.model_selection import StratifiedGroupKFold
 
 from . import models
 from . import stability as st
@@ -93,3 +94,71 @@ def fit_sizer(train: pd.DataFrame, n_iter: int = 40) -> Sizer:
     y = reg_train["rt_ms"].to_numpy()
     guard = float(np.quantile(np.abs(reg.oof_pred_ms - y) / y, 0.9))  # P90 relative error, out of fold
     return Sizer(gate, reg, guard)
+
+
+# --- offline evaluation --------------------------------------------------------------------------------
+
+
+def oof_assessments(configs: pd.DataFrame, folds: int = 5, n_iter: int = 15) -> pd.DataFrame:
+    """For every measured configuration: gate margin and predicted response time from a sizer fitted
+    without that configuration's tuple (grouped, stratified by unsafe)."""
+    y = st.unsafe(configs)
+    g = models.groups(configs)
+    parts = []
+    for tr, te in StratifiedGroupKFold(n_splits=folds, shuffle=True, random_state=SEED).split(configs, y, g):
+        s = fit_sizer(configs.iloc[tr], n_iter=n_iter)
+        a = s.assess(configs.iloc[te])
+        a["guard"] = s.guard
+        parts.append(a)
+    return pd.concat(parts).loc[configs.index]
+
+
+def decision_table(a: pd.DataFrame, slas=SLAS_MS) -> pd.DataFrame:
+    """Per configuration and SLA: did the sizer accept the container, and did the measurement meet the SLA?"""
+    rows = []
+    for sla in slas:
+        truth = (a["label"] == "steady") & (a["rt_ms"] <= sla)
+        sizer = a["safe"] & (a["bound_rt_ms"] <= sla)
+        reg_only = a["pred_rt_ms"] <= sla  # point prediction, no gate, no guard (the naive design)
+        for name, acc in (("sizer", sizer), ("regressor_only", reg_only)):
+            rows.append({"sla_ms": sla, "method": name,
+                         "accepted": int(acc.sum()),
+                         "bad_accepts": int((acc & ~truth).sum()),  # would break the SLA in reality
+                         "needless_rejects": int((~acc & truth).sum()),
+                         "truly_ok": int(truth.sum())})
+    return pd.DataFrame(rows)
+
+
+def workload_choices(a: pd.DataFrame, slas=SLAS_MS) -> pd.DataFrame:
+    """Sizing among the containers actually measured for each workload (so every choice can be checked).
+
+    Workload = (arr, MB written per request, cpuLoad); sizes below 100 write nothing and behave identically.
+    """
+    a = a.copy()
+    a["cost"] = cost(a.cpus, a.memory, a.device_write)
+    rows = []
+    for (arr, mb, cl), w in a.groupby(["arr", "mb_written", "cpuLoad"]):
+        w = w.groupby(["cpus", "memory", "device_write"], as_index=False).agg(
+            cost=("cost", "first"), rt_ms=("rt_ms", "median"), steady=("label", lambda s: (s == "steady").all()),
+            safe=("safe", "all"), bound=("bound_rt_ms", "max"), pred=("pred_rt_ms", "max"))
+        if len(w) < 2:
+            continue
+        w = w.sort_values(["cost", "cpus", "memory", "device_write"])
+        for sla in slas:
+            truth = w.steady & (w.rt_ms <= sla)
+            if not truth.any():
+                continue  # no measured container meets this SLA: nothing to judge
+            best_true = w[truth].iloc[0]
+            for name, acc in (("sizer", w.safe & (w.bound <= sla)), ("regressor_only", w.pred <= sla)):
+                pick = w[acc]
+                if not len(pick):
+                    rows.append({"workload": f"{arr}/{mb:g}MB/{cl}", "sla_ms": sla, "method": name, "outcome": "none"})
+                    continue
+                p = pick.iloc[0]
+                ok = bool(p.steady and p.rt_ms <= sla)
+                rows.append({"workload": f"{arr}/{mb:g}MB/{cl}", "sla_ms": sla, "method": name,
+                             "outcome": "meets_sla" if ok else "violates_sla",
+                             "optimal": bool(ok and p.cost == best_true.cost),
+                             "regret": float(p.cost / best_true.cost - 1) if ok else np.nan,
+                             "measured_rt_ms": float(p.rt_ms), "n_options": len(w)})
+    return pd.DataFrame(rows)

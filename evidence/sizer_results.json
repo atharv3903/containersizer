@@ -1,0 +1,36 @@
+{
+ "decisions_total": {
+  "regressor_only": {
+   "accepted": 1829,
+   "bad_accepts": 60,
+   "needless_rejects": 2,
+   "truly_ok": 1771
+  },
+  "sizer": {
+   "accepted": 1647,
+   "bad_accepts": 2,
+   "needless_rejects": 126,
+   "truly_ok": 1771
+  }
+ },
+ "workload_summary": {
+  "regressor_only": {
+   "cases": 268,
+   "meets_sla": 257,
+   "violates_sla": 11,
+   "none": 0,
+   "optimal": 257,
+   "mean_regret_when_met": 0.0
+  },
+  "sizer": {
+   "cases": 268,
+   "meets_sla": 252,
+   "violates_sla": 0,
+   "none": 16,
+   "optimal": 227,
+   "mean_regret_when_met": 0.022611868976501776
+  }
+ },
+ "guard": 0.03839726610289044,
+ "theta_io": 0.6
+}

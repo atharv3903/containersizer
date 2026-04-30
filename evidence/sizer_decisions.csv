@@ -1,0 +1,15 @@
+sla_ms,method,accepted,bad_accepts,needless_rejects,truly_ok
+10,sizer,87,0,2,89
+10,regressor_only,94,5,0,89
+20,sizer,191,1,6,196
+20,regressor_only,200,6,2,196
+30,sizer,245,1,38,282
+30,regressor_only,295,13,0,282
+50,sizer,267,0,19,286
+50,regressor_only,295,9,0,286
+100,sizer,267,0,19,286
+100,regressor_only,295,9,0,286
+200,sizer,295,0,21,316
+200,regressor_only,325,9,0,316
+500,sizer,295,0,21,316
+500,regressor_only,325,9,0,316
