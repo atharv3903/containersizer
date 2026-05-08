@@ -1,4 +1,4 @@
-"""Command line: `csizer verify | report | plots`."""
+"""Command-line interface for dataset checks, evaluation and sizing."""
 
 from __future__ import annotations
 
@@ -24,7 +24,47 @@ def main(argv: list[str] | None = None) -> int:
     mp.add_argument("--n-iter", type=int, default=40)
     sp = sub.add_parser("stability", help="utilisation gate vs classifiers (stage 3)")
     sp.add_argument("--out", type=Path, required=True)
+    zp = sub.add_parser("sizer", help="offline evaluation of the sizer (stage 4)")
+    zp.add_argument("--out", type=Path, required=True)
+    rp2 = sub.add_parser("recommend", help="cheapest container for a workload and SLA")
+    for k in ("arr", "size", "cpuLoad"):
+        rp2.add_argument(f"--{k}", type=int, required=True)
+    rp2.add_argument("--sla-ms", type=float, required=True)
+    cp = sub.add_parser("capacity", help="maximum supported arrival rate for a container and SLA")
+    cp.add_argument("--cpus", type=float, required=True)
+    cp.add_argument("--memory-mib", type=int, required=True)
+    cp.add_argument("--device-write", type=int, required=True, help="disk write limit in MB/s")
+    cp.add_argument("--size", type=int, required=True)
+    cp.add_argument("--cpuLoad", type=int, required=True)
+    cp.add_argument("--sla-ms", type=float, required=True)
+    cp.add_argument("--max-arr", type=int, default=50, help="maximum request rate to test")
     a = ap.parse_args(argv)
+    if a.cmd == "capacity" and a.max_arr < 1:
+        cp.error("--max-arr must be at least 1")
+
+    if a.cmd == "sizer":
+        from . import stage4
+
+        r = stage4.run(a.data or default_data_root(), a.out)
+        print(f"sizer: {r['workload_summary']['sizer']}; report at {a.out / 'sizer_report.md'}")
+        return 0
+
+    if a.cmd in {"recommend", "capacity"}:
+        from . import dataset as ds
+        from . import sizer as sz
+
+        c = ds.build_config_table(ds.load_runs(DataPaths(a.data or default_data_root())))
+        s = sz.fit_sizer(c[c.experiment_type == "train"])
+        if a.cmd == "capacity":
+            rate = s.capacity(a.cpus, a.memory_mib, a.device_write, a.size, a.cpuLoad, a.sla_ms, a.max_arr)
+            print(f"capacity: {rate} req/s")
+            return 0
+        best, table = s.recommend(a.arr, a.size, a.cpuLoad, a.sla_ms)
+        cols = ["cpus", "memory", "device_write", "cost", "margin", "safe", "pred_rt_ms", "bound_rt_ms", "meets"]
+        print(table[cols].round(3).to_string(index=False))
+        print("recommendation:", "none" if best is None else
+              f"{best.cpus:g} CPU, {best.memory} MiB, {best.device_write} MB/s")
+        return 0
 
     if a.cmd == "stability":
         from . import stage3
